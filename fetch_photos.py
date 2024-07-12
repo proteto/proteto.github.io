@@ -1,51 +1,53 @@
-from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-import json
+import pickle
 import os
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+import json
 
-# Set up the flow object
-flow = Flow.from_client_secrets_file(
-    'client_secret.json',
-    scopes=['https://www.googleapis.com/auth/photoslibrary.readonly']
-)
+# If modifying these scopes, delete the file token.pickle.
+SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly']
 
-# Generate the authorization URL
-auth_url, _ = flow.authorization_url(prompt='consent')
+def get_google_photos_service():
+    creds = None
+    # The file token.pickle stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first time.
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'client_secret.json', SCOPES)
+            creds = flow.run_local_server(port=8080)  # Specify port 8080 here
+        # Save the credentials for the next run
+        with open('token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
 
-print(f"Please visit this URL to authorize the application: {auth_url}")
+    return build('photoslibrary', 'v1', credentials=creds)
 
-# After the user grants permission, you'll get a code. Enter it here:
-code = input("Enter the authorization code: ")
+def fetch_photos():
+    service = get_google_photos_service()
+    
+    results = service.mediaItems().list(pageSize=100).execute()
+    items = results.get('mediaItems', [])
 
-# Exchange the code for credentials
-flow.fetch_token(code=code)
+    photo_data = []
+    for item in items:
+        photo_data.append({
+            'filename': item['filename'],
+            'baseUrl': item['baseUrl'],
+            'mimeType': item['mimeType']
+        })
 
-# Get the credentials
-credentials = flow.credentials
+    with open('photo_data.json', 'w') as f:
+        json.dump(photo_data, f)
 
-# Save the credentials for future use
-with open('token.json', 'w') as token_file:
-    token_file.write(credentials.to_json())
+    print(f"Fetched and saved data for {len(photo_data)} photos.")
 
-# Build the service
-service = build('photoslibrary', 'v1', credentials=credentials)
-
-# Fetch the photos
-results = service.mediaItems().list(pageSize=100).execute()
-items = results.get('mediaItems', [])
-
-# Process and save the photo data
-photo_data = []
-for item in items:
-    photo_data.append({
-        'filename': item['filename'],
-        'baseUrl': item['baseUrl'],
-        'mimeType': item['mimeType']
-    })
-
-# Save the photo data to a JSON file
-with open('photo_data.json', 'w') as f:
-    json.dump(photo_data, f)
-
-print(f"Fetched and saved data for {len(photo_data)} photos.")
+if __name__ == '__main__':
+    fetch_photos()
